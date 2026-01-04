@@ -42,6 +42,28 @@ func (c *commands) run(s *state, cmd command) error {
 	return handler(s, cmd)
 }
 
+// chapter 4 part 2, middleware
+func middlewareLoggedIn(
+	handler func(s *state, cmd command, user database.User) error,
+) func(*state, command) error {
+	return func(s *state, cmd command) error {
+		currentUser := s.cfg.CurrentUserName
+		if currentUser == "" {
+			return errors.New("no current user set (run login first)")
+		}
+
+		user, err := s.db.GetUser(context.Background(), currentUser)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("user %s does not exist", currentUser)
+			}
+			return err
+		}
+
+		return handler(s, cmd, user)
+	}
+}
+
 func handlerRegister(s *state, cmd command) error {
 	if len(cmd.args) < 1 {
 		return errors.New("register requires a username")
@@ -136,27 +158,13 @@ func handlerAgg(s *state, cmd command) error {
 	return nil
 }
 
-func handlerAddFeed(s *state, cmd command) error {
+func handlerAddFeed(s *state, cmd command, user database.User) error {
 	if len(cmd.args) < 2 {
 		return errors.New("addfeed requires a name and url")
 	}
 
 	feedName := cmd.args[0]
 	feedURL := cmd.args[1]
-
-	// Get current user from config, then from DB
-	currentUser := s.cfg.CurrentUserName
-	if currentUser == "" {
-		return errors.New("no current user set (run login first)")
-	}
-
-	user, err := s.db.GetUser(context.Background(), currentUser)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("user %s does not exist", currentUser)
-		}
-		return err
-	}
 
 	now := time.Now()
 	feed, err := s.db.CreateFeed(context.Background(), database.CreateFeedParams{
@@ -271,6 +279,30 @@ func handlerFollowing(s *state, cmd command) error {
 	return nil
 }
 
+func handlerUnfollow(s *state, cmd command, user database.User) error {
+	if len(cmd.args) != 1 {
+		return errors.New("unfollow requires a url")
+	}
+	feedURL := cmd.args[0]
+
+	feed, err := s.db.GetFeedByURL(context.Background(), feedURL)
+	if err != nil {
+		return err
+	}
+
+	// delete follow by (user_id, feed_id)
+	err = s.db.DeleteFeedFollow(context.Background(), database.DeleteFeedFollowParams{
+		UserID: user.ID,
+		FeedID: feed.ID,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%s unfollowed %s\n", user.Name, feed.Name)
+	return nil
+}
+
 func handlerFeeds(s *state, cmd command) error {
 	if len(cmd.args) != 0 {
 		return errors.New("feeds takes no arguments")
@@ -328,10 +360,11 @@ func main() {
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAgg)
-	cmds.register("addfeed", handlerAddFeed)
+	cmds.register("addfeed", middlewareLoggedIn(handlerAddFeed))
 	cmds.register("feeds", handlerFeeds)
 	cmds.register("follow", handlerFollow)
 	cmds.register("following", handlerFollowing)
+	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
 
 	cmdName := os.Args[1]
 	cmdArgs := os.Args[2:]
