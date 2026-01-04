@@ -108,6 +108,104 @@ func handlerReset(s *state, cmd command) error {
 	return nil
 }
 
+func handlerUsers(s *state, cmd command) error {
+	users, err := s.db.GetUsers(context.Background())
+	if err != nil {
+		return err
+	}
+
+	for _, u := range users {
+		if u.Name == s.cfg.CurrentUserName {
+			fmt.Printf("%s (current)\n", u.Name)
+		} else {
+			fmt.Printf("%s\n", u.Name)
+		}
+	}
+
+	return nil
+}
+
+// for chapter 3 part 1, website was recommended to be used: https://www.wagslane.dev/index.xml
+func handlerAgg(s *state, cmd command) error {
+	feed, err := fetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%+v\n", *feed)
+	return nil
+}
+
+func handlerAddFeed(s *state, cmd command) error {
+	if len(cmd.args) < 2 {
+		return errors.New("addfeed requires a name and url")
+	}
+
+	feedName := cmd.args[0]
+	feedURL := cmd.args[1]
+
+	// Get current user from config, then from DB
+	currentUser := s.cfg.CurrentUserName
+	if currentUser == "" {
+		return errors.New("no current user set (run login first)")
+	}
+
+	user, err := s.db.GetUser(context.Background(), currentUser)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("user %s does not exist", currentUser)
+		}
+		return err
+	}
+
+	now := time.Now()
+	feed, err := s.db.CreateFeed(context.Background(), database.CreateFeedParams{
+		ID:        uuid.New(),
+		CreatedAt: now,
+		UpdatedAt: now,
+		Name:      feedName,
+		Url:       feedURL,
+		UserID:    user.ID,
+	})
+	if err != nil {
+		// Unique violation (url already exists)
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return fmt.Errorf("feed url already exists: %s", feedURL)
+		}
+		return err
+	}
+
+	// Print out the fields of the new feed record
+	fmt.Println("feed created:")
+	fmt.Printf("  id: %s\n", feed.ID)
+	fmt.Printf("  created_at: %v\n", feed.CreatedAt)
+	fmt.Printf("  updated_at: %v\n", feed.UpdatedAt)
+	fmt.Printf("  name: %s\n", feed.Name)
+	fmt.Printf("  url: %s\n", feed.Url)
+	fmt.Printf("  user_id: %s\n", feed.UserID)
+
+	return nil
+}
+
+func handlerFeeds(s *state, cmd command) error {
+	// no args expected
+	if len(cmd.args) != 0 {
+		return errors.New("feeds takes no arguments")
+	}
+
+	feeds, err := s.db.GetFeeds(context.Background())
+	if err != nil {
+		return err
+	}
+
+	for _, f := range feeds {
+		fmt.Printf("* %s\n", f.Name)
+		fmt.Printf("  %s\n", f.Url)
+		fmt.Printf("  added by: %s\n", f.UserName)
+	}
+	return nil
+}
+
 func main() {
 	// Require: program name + command name at minimum
 	if len(os.Args) < 2 {
@@ -144,6 +242,10 @@ func main() {
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
+	cmds.register("users", handlerUsers)
+	cmds.register("agg", handlerAgg)
+	cmds.register("addfeed", handlerAddFeed)
+	cmds.register("feeds", handlerFeeds)
 
 	cmdName := os.Args[1]
 	cmdArgs := os.Args[2:]
