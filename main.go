@@ -175,6 +175,24 @@ func handlerAddFeed(s *state, cmd command) error {
 		return err
 	}
 
+	// Automatically follow the feed for the current user
+	now2 := time.Now()
+	_, err = s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: now2,
+		UpdatedAt: now2,
+		UserID:    user.ID,
+		FeedID:    feed.ID,
+	})
+	if err != nil {
+		// Ignore duplicate follows
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			// already following — fine
+		} else {
+			return err
+		}
+	}
+
 	// Print out the fields of the new feed record
 	fmt.Println("feed created:")
 	fmt.Printf("  id: %s\n", feed.ID)
@@ -187,8 +205,73 @@ func handlerAddFeed(s *state, cmd command) error {
 	return nil
 }
 
+func handlerFollow(s *state, cmd command) error {
+	if len(cmd.args) != 1 {
+		return errors.New("follow requires a url")
+	}
+	feedURL := cmd.args[0]
+
+	currentUser := s.cfg.CurrentUserName
+	if currentUser == "" {
+		return errors.New("no current user set")
+	}
+
+	user, err := s.db.GetUser(context.Background(), currentUser)
+	if err != nil {
+		return err
+	}
+
+	feed, err := s.db.GetFeedByURL(context.Background(), feedURL)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	ff, err := s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: now,
+		UpdatedAt: now,
+		UserID:    user.ID,
+		FeedID:    feed.ID,
+	})
+	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return fmt.Errorf("%s already follows %s", user.Name, feed.Name)
+		}
+		return err
+	}
+
+	fmt.Printf("%s now follows %s\n", ff.UserName, ff.FeedName)
+	return nil
+}
+
+func handlerFollowing(s *state, cmd command) error {
+	if len(cmd.args) != 0 {
+		return errors.New("following takes no arguments")
+	}
+
+	currentUser := s.cfg.CurrentUserName
+	if currentUser == "" {
+		return errors.New("no current user set")
+	}
+
+	user, err := s.db.GetUser(context.Background(), currentUser)
+	if err != nil {
+		return err
+	}
+
+	follows, err := s.db.GetFeedFollowsForUser(context.Background(), user.ID)
+	if err != nil {
+		return err
+	}
+
+	for _, f := range follows {
+		fmt.Printf("* %s\n", f.FeedName)
+	}
+	return nil
+}
+
 func handlerFeeds(s *state, cmd command) error {
-	// no args expected
 	if len(cmd.args) != 0 {
 		return errors.New("feeds takes no arguments")
 	}
@@ -203,6 +286,7 @@ func handlerFeeds(s *state, cmd command) error {
 		fmt.Printf("  %s\n", f.Url)
 		fmt.Printf("  added by: %s\n", f.UserName)
 	}
+
 	return nil
 }
 
@@ -246,6 +330,8 @@ func main() {
 	cmds.register("agg", handlerAgg)
 	cmds.register("addfeed", handlerAddFeed)
 	cmds.register("feeds", handlerFeeds)
+	cmds.register("follow", handlerFollow)
+	cmds.register("following", handlerFollowing)
 
 	cmdName := os.Args[1]
 	cmdArgs := os.Args[2:]
