@@ -98,6 +98,16 @@ func handlerLogin(s *state, cmd command) error {
 	return nil
 }
 
+func handlerReset(s *state, cmd command) error {
+	// No args required
+	if err := s.db.ResetUsers(context.Background()); err != nil {
+		return err
+	}
+
+	fmt.Println("database reset successful")
+	return nil
+}
+
 func main() {
 	// Require: program name + command name at minimum
 	if len(os.Args) < 2 {
@@ -133,6 +143,7 @@ func main() {
 	}
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
+	cmds.register("reset", handlerReset)
 
 	cmdName := os.Args[1]
 	cmdArgs := os.Args[2:]
