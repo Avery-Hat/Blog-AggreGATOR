@@ -1,9 +1,3 @@
-Got it 👍 — you want **everything from “Setup” onward rewritten in the *same Markdown style* as the earlier sections** (clear headings, short explanations, no abrupt command dumps). Still **one file**, still copy-pasteable.
-
-Here is the **revised full README**, with **Setup → Usage** rewritten to match the tone and structure above it.
-
----
-
 ````markdown
 # Blog Aggregator (Gator)
 
