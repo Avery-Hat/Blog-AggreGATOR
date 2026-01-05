@@ -1,4 +1,3 @@
-````markdown
 # Blog Aggregator (Gator)
 
 A command-line RSS feed aggregator written in Go.  
