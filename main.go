@@ -9,7 +9,6 @@ import (
 	"gator/internal/database"
 	"log"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -150,26 +149,13 @@ func handlerUsers(s *state, cmd command) error {
 
 // for chapter 3 part 1, website was recommended to be used: https://www.wagslane.dev/index.xml
 func handlerAgg(s *state, cmd command) error {
-	if len(cmd.args) != 1 {
-		return errors.New("agg requires a time_between_reqs (e.g. 1s, 1m, 1h)")
-	}
-
-	timeBetweenRequests, err := time.ParseDuration(cmd.args[0])
+	feed, err := fetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Collecting feeds every %s\n", timeBetweenRequests)
-
-	ticker := time.NewTicker(timeBetweenRequests)
-	defer ticker.Stop()
-
-	for ; ; <-ticker.C {
-		if err := scrapeFeeds(s); err != nil {
-			// don’t crash the loop on one bad feed
-			fmt.Fprintln(os.Stderr, "error scraping feeds:", err)
-		}
-	}
+	fmt.Printf("%+v\n", *feed)
+	return nil
 }
 
 func handlerAddFeed(s *state, cmd command, user database.User) error {
@@ -336,96 +322,6 @@ func handlerFeeds(s *state, cmd command) error {
 	return nil
 }
 
-func scrapeFeeds(s *state) error {
-	feed, err := s.db.GetNextFeedToFetch(context.Background())
-	if err != nil {
-		return err
-	}
-
-	// mark fetched first (per assignment)
-	if err := s.db.MarkFeedFetched(context.Background(), feed.ID); err != nil {
-		return err
-	}
-
-	fmt.Printf("fetching feed: %s (%s)\n", feed.Name, feed.Url)
-
-	rss, err := fetchFeed(context.Background(), feed.Url)
-	if err != nil {
-		return err
-	}
-	// posts section updated, chapter 5 part 2
-	for _, item := range rss.Channel.Item {
-		now := time.Now()
-
-		// description nullable
-		desc := sql.NullString{Valid: false}
-		if item.Description != "" {
-			desc = sql.NullString{String: item.Description, Valid: true}
-		}
-
-		// published_at nullable
-		var publishedAt sql.NullTime
-		if t, ok := parsePubDate(item.PubDate); ok {
-			publishedAt = sql.NullTime{Time: t, Valid: true}
-		}
-
-		_, err := s.db.CreatePost(context.Background(), database.CreatePostParams{
-			ID:          uuid.New(),
-			CreatedAt:   now,
-			UpdatedAt:   now,
-			Title:       item.Title,
-			Url:         item.Link,
-			Description: desc,
-			PublishedAt: publishedAt,
-			FeedID:      feed.ID,
-		})
-		if err != nil {
-			// Ignore duplicate URL errors
-			if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
-				continue
-			}
-			log.Printf("error creating post (url=%s): %v", item.Link, err)
-		}
-	}
-
-	return nil
-}
-
-func handlerBrowse(s *state, cmd command, user database.User) error {
-	limit := int32(2)
-	if len(cmd.args) >= 1 {
-		n, err := strconv.Atoi(cmd.args[0])
-		if err != nil || n <= 0 {
-			return fmt.Errorf("browse limit must be a positive integer")
-		}
-		limit = int32(n)
-	}
-
-	posts, err := s.db.GetPostsForUser(context.Background(), database.GetPostsForUserParams{
-		UserID: user.ID,
-		Limit:  limit,
-	})
-	if err != nil {
-		return err
-	}
-
-	for _, p := range posts {
-		fmt.Println("-------------------------------------------------")
-		fmt.Println(p.Title)
-		fmt.Println(p.Url)
-
-		if p.PublishedAt.Valid {
-			fmt.Println("Published:", p.PublishedAt.Time)
-		}
-		if p.Description.Valid {
-			fmt.Println()
-			fmt.Println(p.Description.String)
-		}
-	}
-	fmt.Println("-------------------------------------------------")
-	return nil
-}
-
 func main() {
 	// Require: program name + command name at minimum
 	if len(os.Args) < 2 {
@@ -469,7 +365,6 @@ func main() {
 	cmds.register("follow", handlerFollow)
 	cmds.register("following", handlerFollowing)
 	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
-	cmds.register("browse", middlewareLoggedIn(handlerBrowse))
 
 	cmdName := os.Args[1]
 	cmdArgs := os.Args[2:]

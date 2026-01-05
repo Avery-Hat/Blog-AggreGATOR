@@ -66,28 +66,3 @@ func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 
 	return &feed, nil
 }
-
-func parsePubDate(pubDate string) (time.Time, bool) {
-	if pubDate == "" {
-		return time.Time{}, false
-	}
-
-	// Most common RSS/Atom-ish layouts you’ll see in the wild
-	layouts := []string{
-		time.RFC1123Z,                    // "Mon, 02 Jan 2006 15:04:05 -0700"
-		time.RFC1123,                     // "Mon, 02 Jan 2006 15:04:05 MST"
-		time.RFC822Z,                     // "02 Jan 06 15:04 -0700"
-		time.RFC822,                      // "02 Jan 06 15:04 MST"
-		time.RFC3339,                     // "2006-01-02T15:04:05Z07:00"
-		time.RFC3339Nano,                 // "2006-01-02T15:04:05.999999999Z07:00"
-		"Mon, 2 Jan 2006 15:04:05 -0700", // some feeds omit leading zero
-	}
-
-	for _, layout := range layouts {
-		if t, err := time.Parse(layout, pubDate); err == nil {
-			return t, true
-		}
-	}
-
-	return time.Time{}, false
-}

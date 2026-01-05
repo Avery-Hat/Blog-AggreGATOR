@@ -1,3 +1,10 @@
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+````markdown
+=======
+>>>>>>> efba370 (added chapter 5, added readme)
+>>>>>>> 920c584 (added readme after pull request)
 # Blog Aggregator (Gator)
 
 A command-line RSS feed aggregator written in Go.  
